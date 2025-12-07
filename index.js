@@ -123,6 +123,32 @@ async function run() {
       res.send({ role: result?.role });
     });
 
+    // User profile API
+    // Get Single User Info
+    app.get("/user/:email", verifyToken, async (req, res) => {
+      const email = req.params.email;
+      const result = await usersCollection.findOne({ email });
+      res.send(result);
+    });
+
+    // Update User Profile
+    app.patch("/user/:email", verifyToken, async (req, res) => {
+      const email = req.params.email;
+      const user = req.body;
+      const filter = { email: email };
+      const updateDoc = {
+        $set: {
+          name: user.name,
+          avatar: user.avatar,
+          district: user.district,
+          upazila: user.upazila,
+          bloodGroup: user.bloodGroup,
+        },
+      };
+      const result = await usersCollection.updateOne(filter, updateDoc);
+      res.send(result);
+    });
+
     // DONATION REQUEST API
     // Create Donation Request
     app.post("/donation-request", verifyToken, async (req, res) => {
