@@ -153,21 +153,24 @@ async function run() {
     // Create Donation Request
     app.post("/donation-request", verifyToken, async (req, res) => {
       const request = req.body;
+      const requesterEmail = req.user.email;
 
-      // check user status is active
+      // 1. Check if user is blocked
       const requester = await usersCollection.findOne({
-        email: req.user.email,
+        email: requesterEmail,
       });
       if (requester.status === "blocked") {
         return res
           .status(403)
-          .send({ message: "Blocked users cannot create requests" });
+          .send({ message: "Blocked users cannot create donation requests" });
       }
 
+      // 2. Add Default Status
       const newRequest = {
         ...request,
-        status: "pending",
+        status: "pending", // Default status as per requirements
       };
+
       const result = await requestsCollection.insertOne(newRequest);
       res.send(result);
     });
