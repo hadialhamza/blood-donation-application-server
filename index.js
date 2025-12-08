@@ -175,6 +175,93 @@ async function run() {
       res.send(result);
     });
 
+    // Donation request management API
+    // Get Requests filtered by Email
+    app.get("/donation-requests/:email", verifyToken, async (req, res) => {
+      const email = req.params.email;
+      const { status } = req.query;
+
+      // Verify the user is requesting their own data
+      if (req.user.email !== email) {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+
+      // Query
+      let query = { requesterEmail: email };
+      if (status) {
+        query.status = status;
+      }
+
+      const result = await requestsCollection.find(query).toArray();
+      res.send(result);
+    });
+
+    // Delete Donation Request
+    app.delete("/donation-request/:id", verifyToken, async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await requestsCollection.deleteOne(query);
+      res.send(result);
+    });
+
+    // Update Request Status
+    app.patch("/donation-request-status/:id", verifyToken, async (req, res) => {
+      const id = req.params.id;
+      const { status } = req.body;
+      const query = { _id: new ObjectId(id) };
+      const updateDoc = {
+        $set: { status: status },
+      };
+      const result = await requestsCollection.updateOne(query, updateDoc);
+      res.send(result);
+    });
+
+    // 1. Get Single Request (For Details & Update Page)
+    app.get("/donation-request/:id", verifyToken, async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await requestsCollection.findOne(query);
+      res.send(result);
+    });
+
+    // 2. Update Request (Edit Content)
+    app.put("/donation-request/:id", verifyToken, async (req, res) => {
+      const id = req.params.id;
+      const body = req.body;
+      const query = { _id: new ObjectId(id) };
+      const updateDoc = {
+        $set: {
+          recipientName: body.recipientName,
+          recipientDistrict: body.recipientDistrict,
+          recipientUpazila: body.recipientUpazila,
+          hospitalName: body.hospitalName,
+          fullAddress: body.fullAddress,
+          bloodGroup: body.bloodGroup,
+          donationDate: body.donationDate,
+          donationTime: body.donationTime,
+          requestMessage: body.requestMessage,
+        },
+      };
+      const result = await requestsCollection.updateOne(query, updateDoc);
+      res.send(result);
+    });
+
+    // 3. Donate Action (Changes status to 'inprogress' & adds donor info)
+    app.put("/donation-request/donate/:id", verifyToken, async (req, res) => {
+      const id = req.params.id;
+      const { donorName, donorEmail } = req.body;
+      const query = { _id: new ObjectId(id) };
+      const updateDoc = {
+        $set: {
+          status: "inprogress",
+          donorName: donorName,
+          donorEmail: donorEmail,
+        },
+      };
+      const result = await requestsCollection.updateOne(query, updateDoc);
+      res.send(result);
+    });
+
     // Get All Pending Requests
     app.get("/donation-requests", async (req, res) => {
       const result = await requestsCollection
