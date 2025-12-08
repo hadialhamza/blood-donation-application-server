@@ -127,26 +127,33 @@ async function run() {
 
     // Admin APIs
     // 1. Admin Statistics (Home Page) - Allowed for Volunteer also
-    app.get("/admin-stats", verifyToken, verifyVolunteer, async (req, res) => {
-      const totalUsers = await usersCollection.estimatedDocumentCount();
-      const totalRequests = await requestsCollection.estimatedDocumentCount();
-      // Calculate Total Funds
-      const result = await paymentsCollection
+    // 1. Admin Statistics (Home Page) - Admin Only
+    app.get("/admin-stats", verifyToken, verifyAdmin, async (req, res) => {
+      const users = await usersCollection.estimatedDocumentCount();
+      const bloodRequests = await requestsCollection.estimatedDocumentCount();
+
+      // Calculate total revenue from payments
+      const payments = await paymentsCollection
         .aggregate([
           {
             $group: {
               _id: null,
-              totalAmount: { $sum: "$amount" },
+              totalRevenue: { $sum: "$amount" },
+              totalDonations: { $sum: 1 },
             },
           },
         ])
         .toArray();
-      const totalFunds = result.length > 0 ? result[0].totalAmount : 0;
+
+      const revenue = payments.length > 0 ? payments[0].totalRevenue : 0;
+      const totalDonations =
+        payments.length > 0 ? payments[0].totalDonations : 0;
 
       res.send({
-        totalUsers,
-        totalRequests,
-        totalFunds,
+        users,
+        bloodRequests,
+        revenue,
+        totalDonations,
       });
     });
 
