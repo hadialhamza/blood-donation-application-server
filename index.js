@@ -4,6 +4,14 @@ const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const admin = require("firebase-admin");
 const port = process.env.PORT || 5000;
+const stripeKey = process.env.STRIPE_SECRET_KEY;
+const stripe = stripeKey ? require("stripe")(stripeKey) : null;
+
+if (!stripeKey) {
+  console.warn(
+    "WARNING: STRIPE_SECRET_KEY is missing. Payment features will not work."
+  );
+}
 
 // Initialize Firebase Admin
 const serviceAccount = JSON.parse(
@@ -52,6 +60,8 @@ async function run() {
     const requestsCollection = db.collection("donationRequests");
     const districtsCollection = db.collection("districts");
     const upazilasCollection = db.collection("upazilas");
+    const blogsCollection = db.collection("blogs");
+    const paymentsCollection = db.collection("payments");
 
     // LOCATION API (Public)
     // Get All Districts
@@ -106,17 +116,37 @@ async function run() {
       res.send(result);
     });
 
+    // PUBLIC DONATION REQUESTS API
+    // Get all pending requests for public view
+    app.get("/donation-requests", async (req, res) => {
+      const result = await requestsCollection
+        .find({ status: "pending" })
+        .toArray();
+      res.send(result);
+    });
+
     // Admin APIs
-    // 1. Admin Statistics (Home Page)
-    app.get("/admin-stats", verifyToken, verifyAdmin, async (req, res) => {
+    // 1. Admin Statistics (Home Page) - Allowed for Volunteer also
+    app.get("/admin-stats", verifyToken, verifyVolunteer, async (req, res) => {
       const totalUsers = await usersCollection.estimatedDocumentCount();
       const totalRequests = await requestsCollection.estimatedDocumentCount();
-      // const totalFunds = await paymentsCollection.estimatedDocumentCount(); // implement in last stage
+      // Calculate Total Funds
+      const result = await paymentsCollection
+        .aggregate([
+          {
+            $group: {
+              _id: null,
+              totalAmount: { $sum: "$amount" },
+            },
+          },
+        ])
+        .toArray();
+      const totalFunds = result.length > 0 ? result[0].totalAmount : 0;
 
       res.send({
         totalUsers,
         totalRequests,
-        totalFunds: 0, // this will be dynamic after payments collection
+        totalFunds,
       });
     });
 
@@ -174,6 +204,158 @@ async function run() {
         res.send(result);
       }
     );
+
+    // BLOG / CONTENT MANAGEMENT API
+    // 1. Create Blog (Admin Only)
+    app.post("/blogs", verifyToken, verifyAdmin, async (req, res) => {
+      const blog = req.body;
+      const newBlog = {
+        ...blog,
+        status: "draft", // Default status
+        createdAt: new Date(),
+      };
+      const result = await blogsCollection.insertOne(newBlog);
+      res.send(result);
+    });
+
+    // 2. Get All Blogs (With filtering)
+    // - Public: ?status=published
+    // - Admin: All blogs
+    app.get("/blogs", async (req, res) => {
+      const { status } = req.query;
+      let query = {};
+      if (status) {
+        query.status = status;
+      }
+      const result = await blogsCollection.find(query).toArray();
+      res.send(result);
+    });
+
+    // 2.1 Get Single Blog (Public)
+    app.get("/blogs/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await blogsCollection.findOne(query);
+      res.send(result);
+    });
+
+    // 3. Update Blog Status (Publish/Unpublish) - Admin Only
+    app.patch(
+      "/blogs/status/:id",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const { status } = req.body;
+        const query = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: { status: status },
+        };
+        const result = await blogsCollection.updateOne(query, updateDoc);
+        res.send(result);
+      }
+    );
+
+    // 4. Delete Blog - Admin Only
+    app.delete("/blogs/:id", verifyToken, verifyAdmin, async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await blogsCollection.deleteOne(query);
+      res.send(result);
+    });
+
+    // PAYMENT API
+    // 1. Create Checkout Session
+    app.post("/create-checkout-session", verifyToken, async (req, res) => {
+      if (!stripe) {
+        return res
+          .status(500)
+          .send({ message: "Stripe is not configured on the server." });
+      }
+      const { amount, donorName, donorEmail } = req.body;
+      const amountInCents = parseInt(amount * 100);
+
+      // Create a checkout session
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ["card"],
+        customer_email: donorEmail,
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: {
+                name: "Funding Donation",
+              },
+              unit_amount: amountInCents,
+            },
+            quantity: 1,
+          },
+        ],
+        mode: "payment",
+        success_url: `${
+          process.env.CLIENT_URL || "http://localhost:5173"
+        }/funding?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${
+          process.env.CLIENT_URL || "http://localhost:5173"
+        }/funding`,
+        metadata: {
+          donorName,
+          donorEmail,
+          amount,
+        },
+      });
+
+      res.send({ url: session.url });
+    });
+
+    // 2. Verify & Save Payment from Session
+    app.post("/payments/save-session", verifyToken, async (req, res) => {
+      const { sessionId } = req.body;
+      if (!stripe) {
+        return res.status(500).send({ message: "Stripe error" });
+      }
+
+      try {
+        const session = await stripe.checkout.sessions.retrieve(sessionId);
+        if (session.payment_status === "paid") {
+          // Check if payment already saved (using session ID as transaction ID check)
+          const existing = await paymentsCollection.findOne({
+            transactionId: sessionId,
+          });
+          if (existing) {
+            return res.send({
+              message: "Payment already saved",
+              insertedId: null,
+            });
+          }
+
+          const payment = {
+            name: session.metadata.donorName,
+            email: session.metadata.donorEmail,
+            amount: parseFloat(session.metadata.amount),
+            transactionId: sessionId,
+            date: new Date(),
+          };
+
+          const result = await paymentsCollection.insertOne(payment);
+          res.send(result);
+        } else {
+          res.status(400).send({ message: "Payment not paid" });
+        }
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Error verifying payment" });
+      }
+    });
+
+    // 3. Get All Funding (Verified Token)
+    app.get("/funding", verifyToken, async (req, res) => {
+      const result = await paymentsCollection
+        .find()
+        .sort({ date: -1 })
+        .toArray();
+      res.send(result);
+    });
 
     // ADMIN & VOLUNTEER SHARED API
     // Get All Requests (For Admin & Volunteer)
