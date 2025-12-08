@@ -90,6 +90,75 @@ async function run() {
       next();
     };
 
+    // Admin APIs
+    // 1. Admin Statistics (Home Page)
+    app.get("/admin-stats", verifyToken, verifyAdmin, async (req, res) => {
+      const totalUsers = await usersCollection.estimatedDocumentCount();
+      const totalRequests = await requestsCollection.estimatedDocumentCount();
+      // const totalFunds = await paymentsCollection.estimatedDocumentCount(); // implement in last stage
+
+      res.send({
+        totalUsers,
+        totalRequests,
+        totalFunds: 0, // this will be dynamic after payments collection
+      });
+    });
+
+    // 2. Get All Users
+    app.get("/all-users", verifyToken, verifyAdmin, async (req, res) => {
+      const { status } = req.query;
+      let query = {};
+      if (status) {
+        query.status = status;
+      }
+      const result = await usersCollection.find(query).toArray();
+      res.send(result);
+    });
+
+    // 3. Update User Status
+    app.patch(
+      "/users/status/:id",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const { status } = req.body;
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: { status: status },
+        };
+        const result = await usersCollection.updateOne(filter, updateDoc);
+        res.send(result);
+      }
+    );
+
+    // 4. Update User Role
+    app.patch("/users/role/:id", verifyToken, verifyAdmin, async (req, res) => {
+      const id = req.params.id;
+      const { role } = req.body;
+      const filter = { _id: new ObjectId(id) };
+      const updateDoc = {
+        $set: { role: role },
+      };
+      const result = await usersCollection.updateOne(filter, updateDoc);
+      res.send(result);
+    });
+
+    // 5. Get All Donation Requests
+    app.get(
+      "/all-donation-requests",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        const { status } = req.query;
+        let query = {};
+        if (status) query.status = status;
+
+        const result = await requestsCollection.find(query).toArray();
+        res.send(result);
+      }
+    );
+
     // USER API
     // Save User Data
     // Checks if user exists; if not, saves with default role 'donor'
