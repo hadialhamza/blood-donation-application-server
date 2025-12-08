@@ -159,6 +159,25 @@ async function run() {
       }
     );
 
+    // ADMIN & VOLUNTEER SHARED API
+    // Get All Requests (For Admin & Volunteer)
+    app.get("/all-blood-donation-requests", verifyToken, async (req, res) => {
+      // verify Volunteer Or Admin logic
+      const email = req.user.email;
+      const user = await usersCollection.findOne({ email });
+
+      if (user.role !== "admin" && user.role !== "volunteer") {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+
+      const { status } = req.query;
+      let query = {};
+      if (status) query.status = status;
+
+      const result = await requestsCollection.find(query).toArray();
+      res.send(result);
+    });
+
     // USER API
     // Save User Data
     // Checks if user exists; if not, saves with default role 'donor'
