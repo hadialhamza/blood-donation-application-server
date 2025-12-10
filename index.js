@@ -27,7 +27,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 1. Verify JWT Token
+// Verify JWT Token
 const verifyToken = async (req, res, next) => {
   const token = req?.headers?.authorization?.split(" ")[1];
   if (!token) return res.status(401).send({ message: "Unauthorized Access!" });
@@ -63,7 +63,7 @@ async function run() {
     const blogsCollection = db.collection("blogs");
     const paymentsCollection = db.collection("payments");
 
-    // LOCATION API (Public)
+    // LOCATION API
     // Get All Districts
     app.get("/districts", async (req, res) => {
       const result = await districtsCollection.find().toArray();
@@ -76,7 +76,7 @@ async function run() {
       res.send(result);
     });
 
-    // 2. Verify Admin Middleware
+    // Verify Admin Middleware
     const verifyAdmin = async (req, res, next) => {
       const email = req.user.email;
       const user = await usersCollection.findOne({ email });
@@ -88,7 +88,7 @@ async function run() {
       next();
     };
 
-    // 3. Verify Volunteer Middleware
+    // Verify Volunteer Middleware
     const verifyVolunteer = async (req, res, next) => {
       const email = req.user.email;
       const user = await usersCollection.findOne({ email });
@@ -104,7 +104,6 @@ async function run() {
     app.get("/search-donors", async (req, res) => {
       const { bloodGroup, district, upazila } = req.query;
       let query = {
-        // role: "donor",
         status: "active",
       };
 
@@ -116,8 +115,7 @@ async function run() {
       res.send(result);
     });
 
-    // PUBLIC DONATION REQUESTS API
-    // Get all pending requests for public view
+    // Get all pending requests
     app.get("/donation-requests", async (req, res) => {
       const result = await requestsCollection
         .find({ status: "pending" })
@@ -126,8 +124,6 @@ async function run() {
     });
 
     // Admin APIs
-    // 1. Admin Statistics (Home Page) - Allowed for Volunteer also
-    // 1. Admin Statistics (Home Page) - Admin Only
     app.get("/admin-stats", verifyToken, verifyAdmin, async (req, res) => {
       const users = await usersCollection.estimatedDocumentCount();
       const bloodRequests = await requestsCollection.estimatedDocumentCount();
@@ -149,15 +145,84 @@ async function run() {
       const totalDonations =
         payments.length > 0 ? payments[0].totalDonations : 0;
 
+      // Aggregation data for chart
+      const now = new Date();
+      const sixMonthsAgo = new Date(now.setMonth(now.getMonth() - 5));
+
+      const monthlyStats = await requestsCollection
+        .aggregate([
+          {
+            $match: {},
+          },
+          {
+            $project: {
+              month: {
+                $month: {
+                  $convert: {
+                    input: "$donationDate",
+                    to: "date",
+                    onError: new Date(),
+                    onNull: new Date(),
+                  },
+                },
+              },
+              year: {
+                $year: {
+                  $convert: {
+                    input: "$donationDate",
+                    to: "date",
+                    onError: new Date(),
+                    onNull: new Date(),
+                  },
+                },
+              },
+            },
+          },
+          {
+            $group: {
+              _id: { month: "$month", year: "$year" },
+              count: { $sum: 1 },
+            },
+          },
+          { $sort: { "_id.year": 1, "_id.month": 1 } },
+        ])
+        .toArray();
+
+      // Pie Chart
+      const statusStats = await requestsCollection
+        .aggregate([
+          {
+            $group: {
+              _id: "$status",
+              count: { $sum: 1 },
+            },
+          },
+        ])
+        .toArray();
+
+      // Bar Chart
+      const userStats = await usersCollection
+        .aggregate([
+          {
+            $group: {
+              _id: "$status",
+              count: { $sum: 1 },
+            },
+          },
+        ])
+        .toArray();
+
       res.send({
         users,
         bloodRequests,
         revenue,
         totalDonations,
+        statusStats,
+        userStats,
       });
     });
 
-    // 2. Get All Users
+    // Get All Users
     app.get("/all-users", verifyToken, verifyAdmin, async (req, res) => {
       const { status } = req.query;
       let query = {};
@@ -168,7 +233,7 @@ async function run() {
       res.send(result);
     });
 
-    // 3. Update User Status
+    // Update User Status
     app.patch(
       "/users/status/:id",
       verifyToken,
@@ -185,7 +250,7 @@ async function run() {
       }
     );
 
-    // 4. Update User Role
+    // Update User Role
     app.patch("/users/role/:id", verifyToken, verifyAdmin, async (req, res) => {
       const id = req.params.id;
       const { role } = req.body;
@@ -197,7 +262,7 @@ async function run() {
       res.send(result);
     });
 
-    // 5. Get All Donation Requests
+    // Get All Donation Requests
     app.get(
       "/all-donation-requests",
       verifyToken,
@@ -212,22 +277,19 @@ async function run() {
       }
     );
 
-    // BLOG / CONTENT MANAGEMENT API
-    // 1. Create Blog (Admin Only)
+    // BLOG MANAGEMENT API
     app.post("/blogs", verifyToken, verifyAdmin, async (req, res) => {
       const blog = req.body;
       const newBlog = {
         ...blog,
-        status: "draft", // Default status
+        status: "draft",
         createdAt: new Date(),
       };
       const result = await blogsCollection.insertOne(newBlog);
       res.send(result);
     });
 
-    // 2. Get All Blogs (With filtering)
-    // - Public: ?status=published
-    // - Admin: All blogs
+    // get All Blogs
     app.get("/blogs", async (req, res) => {
       const { status } = req.query;
       let query = {};
@@ -238,7 +300,7 @@ async function run() {
       res.send(result);
     });
 
-    // 2.1 Get Single Blog (Public)
+    // Get Single Blog (Public)
     app.get("/blogs/:id", async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
@@ -246,7 +308,7 @@ async function run() {
       res.send(result);
     });
 
-    // 3. Update Blog Status (Publish/Unpublish) - Admin Only
+    // Update Blog Status (Publish/Unpublish) - Admin Only
     app.patch(
       "/blogs/status/:id",
       verifyToken,
@@ -263,7 +325,7 @@ async function run() {
       }
     );
 
-    // 4. Delete Blog - Admin Only
+    // Delete Blog
     app.delete("/blogs/:id", verifyToken, verifyAdmin, async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
@@ -272,7 +334,6 @@ async function run() {
     });
 
     // PAYMENT API
-    // 1. Create Checkout Session
     app.post("/create-checkout-session", verifyToken, async (req, res) => {
       if (!stripe) {
         return res
@@ -315,7 +376,7 @@ async function run() {
       res.send({ url: session.url });
     });
 
-    // 2. Verify & Save Payment from Session
+    // Verify & Save Payment from Session
     app.post("/payments/save-session", verifyToken, async (req, res) => {
       const { sessionId } = req.body;
       if (!stripe) {
@@ -325,7 +386,6 @@ async function run() {
       try {
         const session = await stripe.checkout.sessions.retrieve(sessionId);
         if (session.payment_status === "paid") {
-          // Check if payment already saved (using session ID as transaction ID check)
           const existing = await paymentsCollection.findOne({
             transactionId: sessionId,
           });
@@ -355,7 +415,7 @@ async function run() {
       }
     });
 
-    // 3. Get All Funding (Verified Token)
+    // Get All Funding
     app.get("/funding", verifyToken, async (req, res) => {
       const result = await paymentsCollection
         .find()
@@ -365,9 +425,7 @@ async function run() {
     });
 
     // ADMIN & VOLUNTEER SHARED API
-    // Get All Requests (For Admin & Volunteer)
     app.get("/all-blood-donation-requests", verifyToken, async (req, res) => {
-      // verify Volunteer Or Admin logic
       const email = req.user.email;
       const user = await usersCollection.findOne({ email });
 
@@ -384,8 +442,6 @@ async function run() {
     });
 
     // USER API
-    // Save User Data
-    // Checks if user exists; if not, saves with default role 'donor'
     app.post("/users", async (req, res) => {
       const user = req.body;
       const query = { email: user.email };
@@ -395,7 +451,6 @@ async function run() {
         return res.send({ message: "user already exists", insertedId: null });
       }
 
-      // Default fields for new registration
       const newUser = {
         ...user,
         role: "donor",
@@ -417,7 +472,6 @@ async function run() {
     });
 
     // User profile API
-    // Get Single User Info
     app.get("/user/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
       const result = await usersCollection.findOne({ email });
@@ -443,12 +497,10 @@ async function run() {
     });
 
     // DONATION REQUEST API
-    // Create Donation Request
     app.post("/donation-request", verifyToken, async (req, res) => {
       const request = req.body;
       const requesterEmail = req.user.email;
 
-      // 1. Check if user is blocked
       const requester = await usersCollection.findOne({
         email: requesterEmail,
       });
@@ -458,10 +510,10 @@ async function run() {
           .send({ message: "Blocked users cannot create donation requests" });
       }
 
-      // 2. Add Default Status
+      // Add Default Status
       const newRequest = {
         ...request,
-        status: "pending", // Default status as per requirements
+        status: "pending",
       };
 
       const result = await requestsCollection.insertOne(newRequest);
@@ -469,17 +521,14 @@ async function run() {
     });
 
     // Donation request management API
-    // Get Requests filtered by Email
     app.get("/donation-requests/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
       const { status } = req.query;
 
-      // Verify the user is requesting their own data
       if (req.user.email !== email) {
         return res.status(403).send({ message: "forbidden access" });
       }
 
-      // Query
       let query = { requesterEmail: email };
       if (status) {
         query.status = status;
@@ -509,7 +558,7 @@ async function run() {
       res.send(result);
     });
 
-    // 1. Get Single Request (For Details & Update Page)
+    // Get Single Request
     app.get("/donation-request/:id", verifyToken, async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
@@ -517,7 +566,7 @@ async function run() {
       res.send(result);
     });
 
-    // 2. Update Request (Edit Content)
+    // Update Request
     app.put("/donation-request/:id", verifyToken, async (req, res) => {
       const id = req.params.id;
       const body = req.body;
@@ -539,7 +588,7 @@ async function run() {
       res.send(result);
     });
 
-    // 3. Donate Action (Changes status to 'inprogress' & adds donor info)
+    // Donate Action
     app.put("/donation-request/donate/:id", verifyToken, async (req, res) => {
       const id = req.params.id;
       const { donorName, donorEmail } = req.body;
