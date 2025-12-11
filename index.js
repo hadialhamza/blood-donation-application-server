@@ -7,12 +7,6 @@ const port = process.env.PORT || 5000;
 const stripeKey = process.env.STRIPE_SECRET_KEY;
 const stripe = stripeKey ? require("stripe")(stripeKey) : null;
 
-if (!stripeKey) {
-  console.warn(
-    "WARNING: STRIPE_SECRET_KEY is missing. Payment features will not work."
-  );
-}
-
 // Initialize Firebase Admin
 const serviceAccount = JSON.parse(
   Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString("utf-8")
