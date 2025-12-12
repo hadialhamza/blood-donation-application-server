@@ -354,12 +354,10 @@ async function run() {
           },
         ],
         mode: "payment",
-        success_url: `${
-          process.env.CLIENT_URL || "http://localhost:5173"
-        }/funding?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${
-          process.env.CLIENT_URL || "http://localhost:5173"
-        }/funding`,
+        success_url: `${process.env.CLIENT_URL || req.headers.origin || "http://localhost:5173"
+          }/funding?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.CLIENT_URL || req.headers.origin || "http://localhost:5173"
+          }/funding`,
         metadata: {
           donorName,
           donorEmail,
