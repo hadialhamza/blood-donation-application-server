@@ -502,7 +502,7 @@ async function run() {
     });
 
     // 📊 ------------------ DASHBOARD ANALYTICS ------------------ 📊
-    app.get("/admin-stats", verifyToken, verifyAdmin, async (req, res) => {
+    app.get("/admin-stats", verifyToken, verifyVolunteer, async (req, res) => {
       const users = await usersCollection.estimatedDocumentCount();
       const bloodRequests = await requestsCollection.estimatedDocumentCount();
 
